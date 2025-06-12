@@ -1,0 +1,11 @@
+# PyTorch (CUDA 11.8) 安装方式，需单独处理 index-url
+torch==2.2.1+cu118
+torchvision==0.17.1+cu118
+torchaudio==2.2.1
+--extra-index-url https://download.pytorch.org/whl/cu118
+
+# 标准依赖
+numpy==1.26.4
+gym==0.26.2
+mujoco==3.3.2
+stable_baselines3==2.3.0

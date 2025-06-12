@@ -1,6 +1,6 @@
 #  单臂 piper 强化学习
 
-本项目支持单臂（single_piper）强化学习你运动学
+本项目支持单臂（single_piper）强化学习逆运动学
 
 ---
 
@@ -18,6 +18,12 @@ $ conda create -n rl_piper python=3.10.9
 $ conda activate rl_piper
 $ pip install -r requirements.txt
 ```
+
+### 3. train
+python rl_policy/rl_piper_train.py
+
+### 4. 验证
+python rl_policy/rl_piper_test.py
 
 
 

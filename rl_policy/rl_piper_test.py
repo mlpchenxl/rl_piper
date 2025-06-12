@@ -10,6 +10,7 @@ import warnings
 import torch
 import mujoco.viewer
 import os
+import time
 
 # 忽略特定警告
 warnings.filterwarnings("ignore", category=UserWarning, module="stable_baselines3.common.on_policy_algorithm")
@@ -30,6 +31,7 @@ class PiperEnv(gym.Env):
         self.handle.cam.azimuth = 0
         self.handle.cam.elevation = -30
 
+        self.rl_model = PPO.load("./piper_ppo_model.zip")
         # 动作空间，7个关节
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(6,))
         # 观测空间，包含关节位置和目标位置
@@ -40,7 +42,9 @@ class PiperEnv(gym.Env):
             np.random.uniform(0.1, 0.5)     # z
         ])
         print("goal:", self.goal)
-        self.np_random = None        
+        self.np_random = None  
+
+ 
 
     def reset(self, seed=None, options=None):
         if seed is not None:
@@ -53,7 +57,7 @@ class PiperEnv(gym.Env):
         ])
         print("goal:", self.goal)
         obs = np.concatenate([self.data.qpos[:6], self.goal])
-        return obs, {}
+        return obs
 
     def step(self, action):
         self.data.qpos[:6] = action
@@ -78,27 +82,26 @@ class PiperEnv(gym.Env):
 
 
 if __name__ == "__main__":
-    env = make_vec_env(lambda: PiperEnv(), n_envs=1)
+    env = PiperEnv()
+    observation = env.reset()
 
-    policy_kwargs = dict(
-        activation_fn=nn.ReLU,
-        net_arch=[dict(pi=[256, 128], vf=[256, 128])]
-    )
+    try:
+        # Run the simulation loop
+        for step in range(20000):
+            action, _states = env.rl_model.predict(observation)
 
-    model = PPO(
-        "MlpPolicy",
-        env,
-        policy_kwargs=policy_kwargs,
-        verbose=1,
-        n_steps=2048,
-        batch_size=64,
-        n_epochs=10,
-        gamma=0.99,
-        learning_rate=3e-4,
-        device="cuda" if torch.cuda.is_available() else "cpu",
-        tensorboard_log="./ppo_piper/"
-    )
+            current_joint_positions = observation[:6]
+            observation, reward, done, truncated, info = env.step(action)
+            if step % 100 == 0:
+                print("*****************************")
+                print(f"Goal goal: {env.goal}")
+                print(f"Current Joint Positions: {observation[:6]}")
+                print(reward)
 
-    model.learn(total_timesteps=2048*100)
-    model.save("piper_ppo_model")
-    
+            if done or truncated:
+                observation = env.reset()
+                break
+
+            time.sleep(0.05)
+    finally:
+        env.close()

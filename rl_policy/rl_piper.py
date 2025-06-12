@@ -9,6 +9,7 @@ import torch.nn as nn
 import warnings
 import torch
 import mujoco.viewer
+import os
 
 # 忽略特定警告
 warnings.filterwarnings("ignore", category=UserWarning, module="stable_baselines3.common.on_policy_algorithm")
@@ -16,8 +17,12 @@ warnings.filterwarnings("ignore", category=UserWarning, module="stable_baselines
 class PiperEnv(gym.Env):
     def __init__(self):
         super(PiperEnv, self).__init__()
-        self.model = mujoco.MjModel.from_xml_path(
-            '../mujoco_asserts/agilex_piper/scene.xml')
+        # 获取当前脚本文件所在目录
+        script_dir = os.path.dirname(os.path.realpath(__file__))
+        # 构造 scene.xml 的完整路径
+        xml_path = os.path.join(script_dir, '..', 'mujoco_asserts', 'agilex_piper', 'scene.xml')
+        # 加载模型
+        self.model = mujoco.MjModel.from_xml_path(xml_path)
         self.data = mujoco.MjData(self.model)
         self.end_effector_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, 'link6')
         self.handle = mujoco.viewer.launch_passive(self.model, self.data)
@@ -26,7 +31,7 @@ class PiperEnv(gym.Env):
         self.handle.cam.elevation = -30
 
         # 动作空间，7个关节
-        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(7,))
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(6,))
         # 观测空间，包含关节位置和目标位置
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(6 + 3,))
         self.goal = np.array([
@@ -91,7 +96,7 @@ if __name__ == "__main__":
         gamma=0.99,
         learning_rate=3e-4,
         device="cuda" if torch.cuda.is_available() else "cpu",
-        tensorboard_log="../tensorboard/"
+        tensorboard_log="./ppo_piper/"
     )
 
     model.learn(total_timesteps=2048*100)

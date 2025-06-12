@@ -1,0 +1,7 @@
+# 编译生成产物
+__pycache__/
+env/__pycache__
+*.pyc
+env/__pycache__/
+MUJOCO_LOG.TXT
+ppo_piper/

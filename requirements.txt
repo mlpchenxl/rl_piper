@@ -9,3 +9,5 @@ numpy==1.26.4
 gym==0.26.2
 mujoco==3.3.2
 stable_baselines3==2.3.0
+tensorboard==2.17.1
+shimmy==0.2.1

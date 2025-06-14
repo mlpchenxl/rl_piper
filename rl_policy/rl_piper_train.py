@@ -17,7 +17,7 @@ from stable_baselines3.common.evaluation import evaluate_policy
 warnings.filterwarnings("ignore", category=UserWarning, module="stable_baselines3.common.on_policy_algorithm")
 
 class PiperEnv(gym.Env):
-    def __init__(self):
+    def __init__(self, render=True):
         super(PiperEnv, self).__init__()
         # 获取当前脚本文件所在目录
         script_dir = os.path.dirname(os.path.realpath(__file__))
@@ -27,11 +27,14 @@ class PiperEnv(gym.Env):
         self.model = mujoco.MjModel.from_xml_path(xml_path)
         self.data = mujoco.MjData(self.model)
         self.end_effector_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, 'link6')
-        # 可视化相关参数
-        self.handle = mujoco.viewer.launch_passive(self.model, self.data)
-        self.handle.cam.distance = 3
-        self.handle.cam.azimuth = 0
-        self.handle.cam.elevation = -30
+        self.render_mode = render
+        if self.render_mode:
+            self.handle = mujoco.viewer.launch_passive(self.model, self.data)
+            self.handle.cam.distance = 3
+            self.handle.cam.azimuth = 0
+            self.handle.cam.elevation = -30
+        else:
+            self.handle = None
 
         # 各关节运动限位
         self.joint_limits = np.array([
@@ -289,8 +292,8 @@ class PiperEnv(gym.Env):
         done = not is_finite or goal_reached
         info = {'is_success': done}
         truncated = self.step_number > self.episode_len
-
-        self.handle.sync()
+        if self.handle is not None:
+            self.handle.sync()
 
         return observation, reward, done, truncated, info
 
@@ -323,6 +326,8 @@ if __name__ == "__main__":
 
     model.learn(total_timesteps=2048*100, progress_bar=True)
     model.save("piper_ppo_model")
+
+    print(" model sava success ! ")
     
 
 

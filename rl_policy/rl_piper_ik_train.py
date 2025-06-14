@@ -1,4 +1,3 @@
-
 import numpy as np
 import mujoco
 import gym
@@ -10,14 +9,14 @@ import warnings
 import torch
 import mujoco.viewer
 import os
-import time
 from scipy.spatial.transform import Rotation as Rotation
+from stable_baselines3.common.evaluation import evaluate_policy
 
 # 忽略特定警告
 warnings.filterwarnings("ignore", category=UserWarning, module="stable_baselines3.common.on_policy_algorithm")
 
 class PiperEnv(gym.Env):
-    def __init__(self):
+    def __init__(self, render=True):
         super(PiperEnv, self).__init__()
         # 获取当前脚本文件所在目录
         script_dir = os.path.dirname(os.path.realpath(__file__))
@@ -27,12 +26,14 @@ class PiperEnv(gym.Env):
         self.model = mujoco.MjModel.from_xml_path(xml_path)
         self.data = mujoco.MjData(self.model)
         self.end_effector_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, 'link6')
-        # 可视化相关参数
-        self.handle = mujoco.viewer.launch_passive(self.model, self.data)
-        self.handle.cam.distance = 3
-        self.handle.cam.azimuth = 0
-        self.handle.cam.elevation = -30
-        self.rl_model = PPO.load("./piper_ppo_model.zip")
+        self.render_mode = render
+        if self.render_mode:
+            self.handle = mujoco.viewer.launch_passive(self.model, self.data)
+            self.handle.cam.distance = 3
+            self.handle.cam.azimuth = 0
+            self.handle.cam.elevation = -30
+        else:
+            self.handle = None
 
         # 各关节运动限位
         self.joint_limits = np.array([
@@ -41,7 +42,7 @@ class PiperEnv(gym.Env):
             (-2.697, 0),
             (-1.832, 1.832),
             (-1.22, 1.22),
-            (-1.7452, 1.7452),
+            (-3.14, 3.14),
         ])
 
         # 动作空间，6个关节
@@ -192,7 +193,7 @@ class PiperEnv(gym.Env):
 
                 goal_position = np.array([x_goal, y_goal, z_goal])
                 self._label_goal_pose(goal_position, goal_wxyz)
-                print(f"goal_position : {goal_position}, angles : {angles}")
+                print(f"goal_angles : {angles}")
 
 
                 self.goal_pos = goal_pos
@@ -213,7 +214,7 @@ class PiperEnv(gym.Env):
 
         normalized = (action + 1) / 2
         lower_bounds = self.joint_limits[:, 0]
-        upper_bounds = self.joint_limits[:, 1]# 从URDF文件加载机械臂的运动学连接
+        upper_bounds = self.joint_limits[:, 1]
         # 插值计算
         mapped_action = lower_bounds + normalized * (upper_bounds - lower_bounds)
 
@@ -261,9 +262,8 @@ class PiperEnv(gym.Env):
         mapped_action = self.map_action_to_joint_limits(action)
         self.data.qpos[:6] = mapped_action
         self._label_goal_pose(self.goal_pos, self.goal_wxyz)
-        # mujoco 仿真向前推进一步
+        # mujoco 仿真向前推进一步 (这里只更新 qpos , 并不会做动力学积分)
         mujoco.mj_forward(self.model, self.data)
-        mujoco.mj_step(self.model, self.data)
 
         self.step_number += 1
         observation = self._get_observation()
@@ -274,25 +274,20 @@ class PiperEnv(gym.Env):
         # Check if current joint positions are close to the goal
         goal_reached = np.allclose(current_joint_positions, self.goal_angle, atol=1e-2) 
 
-        
-
-
         if goal_reached:
             self.goal_reached_count += 1
-            print(f" goal reach !!! ")
             reward = 10
         else:       
             vec_1 = current_joint_positions - self.goal_angle
             reward_dist = -np.linalg.norm(vec_1)
-            reward_ctrl = -np.square(action).sum()
-            reward = 0.5 * reward_dist + 0.1 * reward_ctrl
+            reward = 0.5 * reward_dist
 
         
         done = not is_finite or goal_reached
         info = {'is_success': done}
         truncated = self.step_number > self.episode_len
-
-        self.handle.sync()
+        if self.handle is not None:
+            self.handle.sync()
 
         return observation, reward, done, truncated, info
 
@@ -302,26 +297,33 @@ class PiperEnv(gym.Env):
 
 
 if __name__ == "__main__":
-    env = PiperEnv()
-    observation, _ = env.reset()
+    env = make_vec_env(lambda: PiperEnv(), n_envs=1)
 
-    try:
-        # Run the simulation loop
-        for step in range(20000):
-            action, _states = env.rl_model.predict(observation)
+    policy_kwargs = dict(
+        activation_fn=nn.ReLU,
+        net_arch=[dict(pi=[256, 128], vf=[256, 128])]
+    )
 
-            current_joint_positions = observation[:6]
-            observation, reward, done, truncated, info = env.step(action)
-            if step % 100 == 0:
-                print("*****************************")
-                print(f"Goal goal: {env.goal}")
-                print(f"Current Joint Positions: {observation[:6]}")
-                print(reward)
+    model = PPO(
+        "MlpPolicy",
+        env,
+        policy_kwargs=policy_kwargs,
+        verbose=1,
+        n_steps=2048,
+        batch_size=64,
+        n_epochs=10,
+        gamma=0.99,
+        learning_rate=3e-4,
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        tensorboard_log="./ppo_piper/"
+    )
 
-            if done or truncated:
-                observation = env.reset()
-                break
+    model.learn(total_timesteps=2048*100, progress_bar=True)
+    model.save("piper_ik_ppo_model")
 
-            time.sleep(0.05)
-    finally:
-        env.close()
+    print(" model sava success ! ")
+
+    ### 继续训练
+    # model = PPO.load("./piper_ppo_model.zip")
+    # model.set_env(env)
+    # model.learn(total_timesteps=2048*100, progress_bar=True)

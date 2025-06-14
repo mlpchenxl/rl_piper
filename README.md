@@ -20,10 +20,10 @@ $ pip install -r requirements.txt
 ```
 
 ### 3. train
-python rl_policy/rl_piper_train.py
+python rl_policy/rl_piper_ik__train.py
 
 ### 4. 验证
-python rl_policy/rl_piper_test.py
+python rl_policy/rl_piper_ik__test.py
 
 
 

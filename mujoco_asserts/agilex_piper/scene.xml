@@ -19,5 +19,35 @@
   <worldbody>
     <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
     <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+
+
+    <body name="target" pos="0 0 0.768" euler="0 0 1.57">
+      <joint name = "fork_gripper" type="free"/>
+       <!-- 可视化坐标轴：X轴-红 -->
+      <geom name="x_axis" type="capsule" fromto="0 0 0 0.1 0 0" size="0.001" rgba="1 0 0 1" contype="0" conaffinity="0"/>
+      <!-- Y轴-绿 -->
+      <geom name="y_axis" type="capsule" fromto="0 0 0 0 0.1 0" size="0.001" rgba="0 1 0 1" contype="0" conaffinity="0"/>
+      <!-- Z轴-蓝 -->
+      <geom name="z_axis" type="capsule" fromto="0 0 0 0 0 0.1" size="0.001" rgba="0 0 1 1" contype="0" conaffinity="0"/>
+      <geom name="fix_handle" type="box"
+            size="0.0035 0.035 0.01"            
+            pos="0.0 0 0"
+            rgba="0.2 0.2 0.8 1" density="300" euler="0 1.57 0" contype="0" conaffinity="0" group="1"/>
+      <geom name="fork_handle" type="box"
+            size="0.025 0.005 0.0035"            
+            pos="-0.022 0 0"
+            rgba="0.2 0.2 0.8 1" density="300" euler="0 0 0" contype="0" conaffinity="0" group="1"/>
+      <geom name="fork_tine_left"  type="capsule"
+            pos="0.02  0.035 0"              
+            euler="0 1.57 0"               
+            size="0.004 0.02"                
+            rgba="0.2 0.2 0.8 1" density="300" contype="0" conaffinity="0" group="1"/>
+      <geom name="fork_tine_right" type="capsule"
+            pos="0.02 -0.035 0"              
+            euler="0 1.57 0"               
+            size="0.004 0.02"
+            rgba="0.2 0.2 0.8 1" density="300" contype="0" conaffinity="0" group="1"/>
+    </body>
+
   </worldbody>
 </mujoco>

@@ -224,6 +224,7 @@
                   <inertial pos="0.0010312 0.0121761 0.0315481" quat="0.0230402 0.707091 0.0373344 0.70576" mass="1.2"
                     diaginertia="0.001 0.001 0.001"/>
                   <joint name="joint6" axis="0 0 1" range="-3.14 3.14"/>
+                  <site name="end_ee" pos="0.0 0.0 0.06" euler="0.0 -1.57 0.0" size="0.01" rgba="1 0 0 0.5"/>
                   <geom quat="0.707105 0 0 0.707108" mesh="link6" material="gray_mat" class="visual"/>
                   <geom quat="0.707105 0 0 0.707108" mesh="link6" class="collision"/>
                   <body name="link7" pos="0 0 0.13503" quat="1.89468e-08 1.89469e-08 0.707108 0.707105" gravcomp="1">
@@ -269,7 +270,7 @@
     <position name="gripper" joint="joint7" class="finger" kp="40" kv="5"/>
   </actuator>
 
-  <keyframe>
+  <!-- <keyframe>
     <key name="home" qpos="0 1.57 -1.3485 0 0 0 0 0 " ctrl="0 1.57 -1.3485 0 0 0 0"/>
-  </keyframe>
+  </keyframe> -->
 </mujoco>

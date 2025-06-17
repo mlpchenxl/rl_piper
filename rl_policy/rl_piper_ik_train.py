@@ -66,6 +66,8 @@ class PiperEnv(gym.Env):
             'z' : (0.2, 0.5)
         }
 
+        self.goal_reached = False
+
         self._reset_noise_scale = .0
 
         # 初始化目标 pose
@@ -248,6 +250,8 @@ class PiperEnv(gym.Env):
         if self.goal_pos is not None and self.goal_quat is not None:
             print(f"self.goal_pos : {self.goal_pos}, self.goal_quat : {self.goal_quat}")
 
+        self.goal_reached = False
+
         return obs, {}
     
     def _get_observation(self):
@@ -279,26 +283,33 @@ class PiperEnv(gym.Env):
         orientation_error = 2 * np.arccos(np.clip(dot_product, -1.0, 1.0))
 
         # 位置误差reward: 距离越小奖励越大，采用负指数衰减
-        pos_reward = np.exp(-5.0 * pos_error)  # 5.0是调节系数，可调
+        pos_reward = np.float16(-pos_error) # 5.0是调节系数，可调
 
         # 姿态误差reward: 误差越小奖励越大，同样用负指数衰减
-        ori_reward = np.exp(-5.0 * orientation_error)
+        ori_reward = np.float16(-orientation_error)
 
         # 细粒度距离reward，用负距离的线性函数或者二次函数
-        fine_grained_reward = -pos_error  # 线性惩罚，也可以改成 -pos_error**2
+        # fine_grained_reward = -pos_error  # 线性惩罚，也可以改成 -pos_error**2
 
         # 综合奖励，给各个reward设置权重
-        w_pos = 0.5
-        w_ori = 0.3
-        w_fine = 0.2
-
-        reward = w_pos * pos_reward + w_ori * ori_reward + w_fine * fine_grained_reward
+        w_pos =  1.0
+        w_ori = 0.5
+        # w_fine = 0.2
+        
+        # reward = w_pos * pos_reward + w_ori * ori_reward + w_fine * fine_grained_reward
+        reward = w_pos * pos_reward + w_ori * ori_reward
+        count = 0
+        if count % 100 == 0:
+            print(f"reward 1 : {w_pos * pos_reward}, reward 2 :{w_ori * ori_reward}")
+        else:
+            count += 1
 
         # 达到目标阈值时，给额外奖励
         pos_thresh = 0.02  # 2cm
         ori_thresh = 0.1   # 大约5.7度
 
         if pos_error < pos_thresh and orientation_error < ori_thresh:
+            self.goal_reached = True
             reward += 10.0  # 达成目标大奖励
 
         return reward
@@ -320,9 +331,9 @@ class PiperEnv(gym.Env):
         reward = self._compute_reward(observation)
         
         # 检查是否终止当前环境采样 (观测值无效或当前角度已经到达目标角度)
-        current_joint_positions = self.data.qpos.flat[:6],
-        goal_reached = np.allclose(current_joint_positions, self.goal_angle, atol=1e-2) 
-        done = not is_finite or goal_reached
+        # current_joint_positions = self.data.qpos.flat[:6],
+        # goal_reached = np.allclose(current_joint_positions, self.goal_angle, atol=1e-2) 
+        done = not is_finite or self.goal_reached
         info = {'is_success': done}
 
         # 检查是否提前终止当前环境采样

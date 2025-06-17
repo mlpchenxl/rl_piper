@@ -170,7 +170,7 @@ class PiperEnv(gym.Env):
                 random_angle = np.random.uniform(low_limit, high_limit)
                 angles.append(random_angle)
 
-            angles = [0.63853179, 1.30619515, -1.1758934, -0.9242861, -0.56871957, -2.61769393]
+            # angles = [0.63853179, 1.30619515, -1.1758934, -0.9242861, -0.56871957, -2.61769393]
             angles = np.array(angles)
             # 
             ori_qpos = self.data.qpos[:6].copy()
@@ -318,7 +318,7 @@ if __name__ == "__main__":
         tensorboard_log="./ppo_piper/"
     )
 
-    model.learn(total_timesteps=2048*100, progress_bar=True)
+    model.learn(total_timesteps=2048*1000, progress_bar=True)
     model.save("piper_ik_ppo_model")
 
     print(" model sava success ! ")
@@ -326,4 +326,4 @@ if __name__ == "__main__":
     ### 继续训练
     # model = PPO.load("./piper_ppo_model.zip")
     # model.set_env(env)
-    # model.learn(total_timesteps=2048*100, progress_bar=True)
+    # model.learn(total_timesteps=2048*100, progress_bar=Truget_action_and_value)

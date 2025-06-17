@@ -47,8 +47,8 @@ class PiperEnv(gym.Env):
 
         # 动作空间，6个关节
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(6,))
-        # 观测空间，包含关节位置和目标位置
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(6 + 7,))
+        # 观测空间，包含末端位姿和目标位姿
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(7 + 7,))
         self.goal = np.array([
             np.random.uniform(0.1, 0.3),    # x
             np.random.uniform(0.0, 0.3),   # y
@@ -66,18 +66,18 @@ class PiperEnv(gym.Env):
             'z' : (0.2, 0.5)
         }
 
-        self._reset_noise_scale = 1e-2
+        self._reset_noise_scale = .0
 
         # 初始化目标 pose
         self.goal_pos = None
-        self.goal_wxyz = None
+        self.goal_quat = None
         self.goal_angle = None
 
         self._set_goal_pose()
-        if self.goal_pos is not None and self.goal_wxyz is not None:
-            print(f"self.goal_pos : {self.goal_pos}, self.goal_wxyz : {self.goal_wxyz}")
+        if self.goal_pos is not None and self.goal_quat is not None:
+            print(f"self.goal_pos : {self.goal_pos}, self.goal_quat : {self.goal_quat}")
 
-        self.episode_len = 2000
+        self.episode_len = 2048
 
         self.init_qpos = np.zeros(6)
         self.init_qvel = np.zeros(6)
@@ -178,7 +178,7 @@ class PiperEnv(gym.Env):
             self.data.qpos[:6] = angles
             mujoco.mj_forward(self.model, self.data)
             mujoco.mj_step(self.model, self.data)
-            goal_pos, goal_wxyz = self._get_site_pos_ori("end_ee")
+            goal_pos, goal_quat = self._get_site_pos_ori("end_ee")
 
             # 恢复
             self.data.qpos[:6] = ori_qpos
@@ -192,12 +192,12 @@ class PiperEnv(gym.Env):
                 self.workspace_limits['z'][0] <= z_goal <= self.workspace_limits['z'][1]):
 
                 goal_position = np.array([x_goal, y_goal, z_goal])
-                self._label_goal_pose(goal_position, goal_wxyz)
+                self._label_goal_pose(goal_position, goal_quat)
                 print(f"goal_angles : {angles}")
 
 
                 self.goal_pos = goal_pos
-                self.goal_wxyz = goal_wxyz
+                self.goal_quat = goal_quat
                 self.goal_angle = angles
                 return
     
@@ -245,46 +245,87 @@ class PiperEnv(gym.Env):
         obs = self._get_observation()
         self.step_number = 0
         print(f"reset env !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        if self.goal_pos is not None and self.goal_wxyz is not None:
-            print(f"self.goal_pos : {self.goal_pos}, self.goal_wxyz : {self.goal_wxyz}")
+        if self.goal_pos is not None and self.goal_quat is not None:
+            print(f"self.goal_pos : {self.goal_pos}, self.goal_quat : {self.goal_quat}")
 
         return obs, {}
     
     def _get_observation(self):
+        # 读取夹爪末端 pose
+        cur_gripper_pos, cur_gripper_quat = self._get_site_pos_ori("end_ee")
         return np.concatenate([
-            self.data.qpos.flat[:6],
+            cur_gripper_pos,
+            cur_gripper_quat,
             self.goal_pos,
-            self.goal_wxyz
+            self.goal_quat
             ])
+    
+    def _compute_reward(self, observation):
+        # 提取当前末端位姿（位置+四元数）
+        cur_gripper_pos = observation[:3]
+        cur_gripper_quat = observation[3:7]
+
+        # 目标位姿
+        goal_pos = self.goal_pos
+        goal_quat = self.goal_quat
+
+        # 计算位置误差（欧氏距离）
+        pos_error = np.linalg.norm(cur_gripper_pos - goal_pos)
+
+        # 计算姿态误差（四元数角度差）
+        # 计算两个四元数的内积，得到cos(theta/2)
+        dot_product = np.abs(np.dot(cur_gripper_quat, goal_quat))
+        # 夹角 theta = 2 * arccos(|q1·q2|)
+        orientation_error = 2 * np.arccos(np.clip(dot_product, -1.0, 1.0))
+
+        # 位置误差reward: 距离越小奖励越大，采用负指数衰减
+        pos_reward = np.exp(-5.0 * pos_error)  # 5.0是调节系数，可调
+
+        # 姿态误差reward: 误差越小奖励越大，同样用负指数衰减
+        ori_reward = np.exp(-5.0 * orientation_error)
+
+        # 细粒度距离reward，用负距离的线性函数或者二次函数
+        fine_grained_reward = -pos_error  # 线性惩罚，也可以改成 -pos_error**2
+
+        # 综合奖励，给各个reward设置权重
+        w_pos = 0.5
+        w_ori = 0.3
+        w_fine = 0.2
+
+        reward = w_pos * pos_reward + w_ori * ori_reward + w_fine * fine_grained_reward
+
+        # 达到目标阈值时，给额外奖励
+        pos_thresh = 0.02  # 2cm
+        ori_thresh = 0.1   # 大约5.7度
+
+        if pos_error < pos_thresh and orientation_error < ori_thresh:
+            reward += 10.0  # 达成目标大奖励
+
+        return reward
 
     def step(self, action):
         # 将 action 映射回真实机械臂关节空间
         mapped_action = self.map_action_to_joint_limits(action)
         self.data.qpos[:6] = mapped_action
-        self._label_goal_pose(self.goal_pos, self.goal_wxyz)
+        self._label_goal_pose(self.goal_pos, self.goal_quat)
         # mujoco 仿真向前推进一步 (这里只更新 qpos , 并不会做动力学积分)
         mujoco.mj_forward(self.model, self.data)
 
         self.step_number += 1
         observation = self._get_observation()
-        # Check if observation contains only finite values
+        # 检查观测量是否包含无效值
         is_finite = np.isfinite(observation).all()
-        current_joint_positions = observation[:6]
 
-        # Check if current joint positions are close to the goal
-        goal_reached = np.allclose(current_joint_positions, self.goal_angle, atol=1e-2) 
-
-        if goal_reached:
-            self.goal_reached_count += 1
-            reward = 10
-        else:       
-            vec_1 = current_joint_positions - self.goal_angle
-            reward_dist = -np.linalg.norm(vec_1)
-            reward = 0.5 * reward_dist
-
+        # 计算 reward
+        reward = self._compute_reward(observation)
         
+        # 检查是否终止当前环境采样 (观测值无效或当前角度已经到达目标角度)
+        current_joint_positions = self.data.qpos.flat[:6],
+        goal_reached = np.allclose(current_joint_positions, self.goal_angle, atol=1e-2) 
         done = not is_finite or goal_reached
         info = {'is_success': done}
+
+        # 检查是否提前终止当前环境采样
         truncated = self.step_number > self.episode_len
         if self.handle is not None:
             self.handle.sync()
@@ -327,3 +368,30 @@ if __name__ == "__main__":
     # model = PPO.load("./piper_ppo_model.zip")
     # model.set_env(env)
     # model.learn(total_timesteps=2048*100, progress_bar=Truget_action_and_value)
+
+
+    """
+    🔁 rollout/ 部分（环境交互结果）
+    ep_len_mean	           每个 episode 平均的步数 (本例为 2000)
+    ep_rew_mean	           每个 episode 平均的累计 reward
+    success_rate	       每个 episode 是否完成成功任务的比例
+
+    ⏱ time/ 部分（训练时间相关）
+    fps	                   每秒仿真多少步
+    iterations	           算法已完成的优化周期
+    time_elapsed	       总共训练的时间, 单位是秒
+    total_timesteps	       总共采样过的环境步数
+
+    🎯 train/ 部分（策略学习质量
+    approx_kl	           当前策略和旧策略之间的 KL 散度（衡量变化幅度）合理范围约 0.01~0.03
+    clip_fraction	       有多少动作被 clip_range 限制 (PPO 的核心) 较高表示训练波动大
+    clip_range	           PPO 的超参数，常见默认值为 0.2
+    entropy_loss	       策略分布的熵（探索性）。越大越随机，越小越确定
+    explained_variance	   Critic 的预测值和真实 return 的相关性 1 表示完全拟合，< 0 表示预测很差
+    learning_rate	       当前学习率
+    loss	               总损失 (值函数 + 策略 + entropy)
+    n_updates	           总共优化了多少次
+    policy_gradient_loss   策略网络的梯度损失 (负值是正常的)
+    std	                   策略网络输出的动作标准差（表示策略不确定性）
+    value_loss	           Critic 的回归损失，越低越好
+    """

@@ -265,51 +265,56 @@ class PiperEnv(gym.Env):
             ])
     
     def _compute_reward(self, observation):
-        # 提取当前末端位姿（位置+四元数）
-        cur_gripper_pos = observation[:3]
-        cur_gripper_quat = observation[3:7]
+        # 提取当前末端 pose
+        cur_gripper_pos = observation[:3].copy()
+        cur_gripper_quat = observation[3:7].copy()
 
-        # 目标位姿
-        goal_pos = self.goal_pos
-        goal_quat = self.goal_quat
+        # 目标 pose
+        goal_pos = self.goal_pos.copy()
+        goal_quat = self.goal_quat.copy()
 
+        # 当前关节角度
+        cur_joint_angle = self.data.qpos[:6].copy()
+        # 目标关节角度
+        goal_angle = self.goal_angle.copy()
+
+        # 计算位置误差 reward
         # 计算位置误差（欧氏距离）
         pos_error = np.linalg.norm(cur_gripper_pos - goal_pos)
+        pos_reward = -np.arctan(pos_error)
 
-        # 计算姿态误差（四元数角度差）
+        # 计算姿态误差 reward（四元数角度差）
         # 计算两个四元数的内积，得到cos(theta/2)
         dot_product = np.abs(np.dot(cur_gripper_quat, goal_quat))
-        # 夹角 theta = 2 * arccos(|q1·q2|)
         orientation_error = 2 * np.arccos(np.clip(dot_product, -1.0, 1.0))
-
-        # 位置误差reward: 距离越小奖励越大，采用负指数衰减
-        pos_reward = np.float16(-pos_error) # 5.0是调节系数，可调
-
         # 姿态误差reward: 误差越小奖励越大，同样用负指数衰减
-        ori_reward = np.float16(-orientation_error)
+        ori_reward = -np.arctan(orientation_error)
 
-        # 细粒度距离reward，用负距离的线性函数或者二次函数
-        # fine_grained_reward = -pos_error  # 线性惩罚，也可以改成 -pos_error**2
+        # 计算关节角度差异 reward
+        angle_error = np.linalg.norm(cur_joint_angle - goal_angle)
+        angle_reward = -np.arctan(angle_error)
+        
 
         # 综合奖励，给各个reward设置权重
         w_pos =  1.0
-        w_ori = 0.5
-        # w_fine = 0.2
-        
+        w_ori = 1.0
+        w_angle = 1.0
+
         # reward = w_pos * pos_reward + w_ori * ori_reward + w_fine * fine_grained_reward
-        reward = w_pos * pos_reward + w_ori * ori_reward
-        count = 0
-        if count % 100 == 0:
-            print(f"reward 1 : {w_pos * pos_reward}, reward 2 :{w_ori * ori_reward}")
-        else:
-            count += 1
+        reward = w_pos * pos_reward + w_ori * ori_reward + w_angle * angle_reward
+        # print(f"pos_reward : {pos_reward}, ori_reward :{ori_reward}, angle_reward :{angle_reward}")
 
         # 达到目标阈值时，给额外奖励
         pos_thresh = 0.02  # 2cm
         ori_thresh = 0.1   # 大约5.7度
+        angle_thresh = 0.1
 
-        if pos_error < pos_thresh and orientation_error < ori_thresh:
-            self.goal_reached = True
+        print(f"pos_error : {pos_error}, orientation_error : {orientation_error}, angle_error : {angle_error}")
+        print(f"pos_reward : {pos_reward}, ori_reward : {ori_reward}, angle_reward : {angle_reward}")
+
+        if (pos_error < pos_thresh and orientation_error < ori_thresh) or angle_error < angle_thresh:
+            # self.goal_reached = True
+            print(f"1111111111")
             reward += 10.0  # 达成目标大奖励
 
         return reward

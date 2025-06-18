@@ -16,7 +16,7 @@ from stable_baselines3.common.evaluation import evaluate_policy
 warnings.filterwarnings("ignore", category=UserWarning, module="stable_baselines3.common.on_policy_algorithm")
 
 class PiperEnv(gym.Env):
-    def __init__(self, render=True):
+    def __init__(self, render=False):
         super(PiperEnv, self).__init__()
         # 获取当前脚本文件所在目录
         script_dir = os.path.dirname(os.path.realpath(__file__))
@@ -79,7 +79,7 @@ class PiperEnv(gym.Env):
         if self.goal_pos is not None and self.goal_quat is not None:
             print(f"self.goal_pos : {self.goal_pos}, self.goal_quat : {self.goal_quat}")
 
-        self.episode_len = 2048
+        self.episode_len = 200
 
         self.init_qpos = np.zeros(6)
         self.init_qvel = np.zeros(6)
@@ -327,24 +327,25 @@ class PiperEnv(gym.Env):
         ori_reward = self._compute_orientation_reward(cur_gripper_quat, goal_quat)
 
         # 计算关节角度差异 reward
+        # angle_error = np.linalg.norm(cur_joint_angle[:2] - goal_angle[:2])
         angle_error = np.linalg.norm(cur_joint_angle - goal_angle)
         angle_reward = -np.arctan(angle_error)
         
 
         # 综合奖励，给各个reward设置权重
-        w_pos =  5.0
+        w_pos =  2.0
         w_ori = 0.2
-        w_angle = 0.3
+        w_angle = 0.5
 
-        # reward = w_pos * pos_reward + w_ori * ori_reward + w_fine * fine_grained_reward
+        reward = w_pos * pos_reward + w_ori * ori_reward
         # reward = w_pos * pos_reward + w_ori * ori_reward + w_angle * angle_reward
         # reward = w_pos * pos_reward + w_angle * angle_reward
-        reward = w_pos * pos_reward
-
-        # print(f"pos_reward : {pos_reward}, ori_reward :{ori_reward}, angle_reward :{angle_reward}")
+        # reward = w_pos * pos_reward
+        # print(f"pos_error : {pos_error}, angle_error :{angle_error}")
+        # print(f"pos_reward : {w_pos * pos_reward}, ori_reward :{ori_reward}, angle_reward :{w_angle * angle_reward}")
 
         # 达到目标阈值时，给额外奖励
-        pos_thresh = 0.1  # 2cm
+        pos_thresh = 0.05  # 2cm
         angle_thresh = 0.1
 
         # print(f"pos_error : {pos_error}, orientation_error : {orientation_error}, angle_error : {angle_error}")
@@ -391,7 +392,7 @@ class PiperEnv(gym.Env):
 
 
 if __name__ == "__main__":
-    env = make_vec_env(lambda: PiperEnv(), n_envs=1)
+    env = make_vec_env(lambda: PiperEnv(), n_envs=100)
 
     policy_kwargs = dict(
         activation_fn=nn.ReLU,
@@ -403,7 +404,7 @@ if __name__ == "__main__":
         env,
         policy_kwargs=policy_kwargs,
         verbose=1,
-        n_steps=2048,
+        n_steps=20,
         batch_size=64,
         n_epochs=10,
         gamma=0.99,
@@ -412,7 +413,7 @@ if __name__ == "__main__":
         tensorboard_log="./ppo_piper/"
     )
 
-    model.learn(total_timesteps=2048*1000, progress_bar=True)
+    model.learn(total_timesteps=2000*10000, progress_bar=True)
     model.save("piper_ik_ppo_model")
 
     print(" model sava success ! ")

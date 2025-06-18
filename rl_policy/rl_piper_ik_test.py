@@ -45,7 +45,7 @@ class PiperEnv(gym.Env):
             (-1.22, 1.22),
             (-3.14, 3.14),
         ])
-        self.rl_model = PPO.load("./piper_ik_ppo_model_nn.zip")
+        self.rl_model = PPO.load("./piper_ik_ppo_model.zip")
 
 
         # 动作空间，6个关节
@@ -169,8 +169,8 @@ class PiperEnv(gym.Env):
                 random_angle = np.random.uniform(low_limit, high_limit)
                 angles.append(random_angle)
 
-            # angles = [0.63853179, 1.30619515, -1.1758934, -0.9242861, -0.56871957, -2.61769393]
-            angles = np.array(angles)
+            angles = [0.63853179, 1.30619515, -1.1758934, -0.9242861, -0.56871957, -2.61769393]
+            # angles = np.array(angles)
             # 
             ori_qpos = self.data.qpos[:6].copy()
             # 模型往前一步
@@ -324,7 +324,7 @@ class PiperEnv(gym.Env):
         ori_reward = self._compute_orientation_reward(cur_gripper_quat, goal_quat)
 
         # 计算关节角度差异 reward
-        angle_error = np.linalg.norm(cur_joint_angle - goal_angle)
+        angle_error = np.linalg.norm(cur_joint_angle[:2] - goal_angle[:2])
         angle_reward = -np.arctan(angle_error)
         
 
@@ -338,7 +338,7 @@ class PiperEnv(gym.Env):
         # reward = w_pos * pos_reward + w_angle * angle_reward
         reward = w_pos * pos_reward
 
-        # print(f"pos_reward : {pos_reward}, ori_reward :{ori_reward}, angle_reward :{angle_reward}")
+        print(f"pos_reward : {pos_reward}, ori_reward :{ori_reward}, angle_reward :{angle_reward}")
 
         # 达到目标阈值时，给额外奖励
         pos_thresh = 0.1  # 2cm

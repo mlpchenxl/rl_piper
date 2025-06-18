@@ -17,7 +17,7 @@ from scipy.spatial.transform import Rotation as Rotation
 warnings.filterwarnings("ignore", category=UserWarning, module="stable_baselines3.common.on_policy_algorithm")
 
 class PiperEnv(gym.Env):
-    def __init__(self):
+    def __init__(self, render=True):
         super(PiperEnv, self).__init__()
         # 获取当前脚本文件所在目录
         script_dir = os.path.dirname(os.path.realpath(__file__))
@@ -27,12 +27,14 @@ class PiperEnv(gym.Env):
         self.model = mujoco.MjModel.from_xml_path(xml_path)
         self.data = mujoco.MjData(self.model)
         self.end_effector_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, 'link6')
-        # 可视化相关参数
-        self.handle = mujoco.viewer.launch_passive(self.model, self.data)
-        self.handle.cam.distance = 3
-        self.handle.cam.azimuth = 0
-        self.handle.cam.elevation = -30
-        self.rl_model = PPO.load("./piper_ppo_model.zip")
+        self.render_mode = render
+        if self.render_mode:
+            self.handle = mujoco.viewer.launch_passive(self.model, self.data)
+            self.handle.cam.distance = 3
+            self.handle.cam.azimuth = 0
+            self.handle.cam.elevation = -30
+        else:
+            self.handle = None
 
         # 各关节运动限位
         self.joint_limits = np.array([
@@ -41,19 +43,15 @@ class PiperEnv(gym.Env):
             (-2.697, 0),
             (-1.832, 1.832),
             (-1.22, 1.22),
-            (-1.7452, 1.7452),
+            (-3.14, 3.14),
         ])
+        self.rl_model = PPO.load("./piper_ik_ppo_model_nn.zip")
+
 
         # 动作空间，6个关节
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(6,))
-        # 观测空间，包含关节位置和目标位置
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(6 + 7,))
-        self.goal = np.array([
-            np.random.uniform(0.1, 0.3),    # x
-            np.random.uniform(0.0, 0.3),   # y
-            np.random.uniform(0.1, 0.5)     # z
-        ])
-        print("goal:", self.goal)
+        # 观测空间，包含末端位姿和目标位姿
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(7 + 7,))
         self.np_random = None   
 
         self.step_number = 0
@@ -65,18 +63,20 @@ class PiperEnv(gym.Env):
             'z' : (0.2, 0.5)
         }
 
-        self._reset_noise_scale = 1e-2
+        self.goal_reached = False
+
+        self._reset_noise_scale = .0
 
         # 初始化目标 pose
         self.goal_pos = None
-        self.goal_wxyz = None
+        self.goal_quat = None
         self.goal_angle = None
 
         self._set_goal_pose()
-        if self.goal_pos is not None and self.goal_wxyz is not None:
-            print(f"self.goal_pos : {self.goal_pos}, self.goal_wxyz : {self.goal_wxyz}")
+        if self.goal_pos is not None and self.goal_quat is not None:
+            print(f"self.goal_pos : {self.goal_pos}, self.goal_quat : {self.goal_quat}")
 
-        self.episode_len = 2000
+        self.episode_len = 200
 
         self.init_qpos = np.zeros(6)
         self.init_qvel = np.zeros(6)
@@ -168,9 +168,8 @@ class PiperEnv(gym.Env):
                 high_limit = self.model.jnt_range[joint_id, 1] if self.model.jnt_limited[joint_id] else np.pi
                 random_angle = np.random.uniform(low_limit, high_limit)
                 angles.append(random_angle)
-            
-            # 当前是 fix 的角度
-            angles = [0.63853179, 1.30619515, -1.1758934, -0.9242861, -0.56871957, -2.61769393]
+
+            # angles = [0.63853179, 1.30619515, -1.1758934, -0.9242861, -0.56871957, -2.61769393]
             angles = np.array(angles)
             # 
             ori_qpos = self.data.qpos[:6].copy()
@@ -178,7 +177,7 @@ class PiperEnv(gym.Env):
             self.data.qpos[:6] = angles
             mujoco.mj_forward(self.model, self.data)
             mujoco.mj_step(self.model, self.data)
-            goal_pos, goal_wxyz = self._get_site_pos_ori("end_ee")
+            goal_pos, goal_quat = self._get_site_pos_ori("end_ee")
 
             # 恢复
             self.data.qpos[:6] = ori_qpos
@@ -192,12 +191,12 @@ class PiperEnv(gym.Env):
                 self.workspace_limits['z'][0] <= z_goal <= self.workspace_limits['z'][1]):
 
                 goal_position = np.array([x_goal, y_goal, z_goal])
-                self._label_goal_pose(goal_position, goal_wxyz)
-                print(f"goal_position : {goal_position}, angles : {angles}")
+                self._label_goal_pose(goal_position, goal_quat)
+                print(f"goal_angles : {angles}")
 
 
                 self.goal_pos = goal_pos
-                self.goal_wxyz = goal_wxyz
+                self.goal_quat = goal_quat
                 self.goal_angle = angles
                 return
     
@@ -214,7 +213,7 @@ class PiperEnv(gym.Env):
 
         normalized = (action + 1) / 2
         lower_bounds = self.joint_limits[:, 0]
-        upper_bounds = self.joint_limits[:, 1]# 从URDF文件加载机械臂的运动学连接
+        upper_bounds = self.joint_limits[:, 1]
         # 插值计算
         mapped_action = lower_bounds + normalized * (upper_bounds - lower_bounds)
 
@@ -245,55 +244,141 @@ class PiperEnv(gym.Env):
         obs = self._get_observation()
         self.step_number = 0
         print(f"reset env !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        if self.goal_pos is not None and self.goal_wxyz is not None:
-            print(f"self.goal_pos : {self.goal_pos}, self.goal_wxyz : {self.goal_wxyz}")
+        if self.goal_pos is not None and self.goal_quat is not None:
+            print(f"self.goal_pos : {self.goal_pos}, self.goal_quat : {self.goal_quat}")
+
+        self.goal_reached = False
 
         return obs, {}
     
     def _get_observation(self):
+        # 读取夹爪末端 pose
+        cur_gripper_pos, cur_gripper_quat = self._get_site_pos_ori("end_ee")
         return np.concatenate([
-            self.data.qpos.flat[:6],
+            cur_gripper_pos,
+            cur_gripper_quat,
             self.goal_pos,
-            self.goal_wxyz
+            self.goal_quat
             ])
+    
+    def _compute_orientation_reward(self, cur_quat, goal_quat, axis_weight=None, use_arctan=True):
+        """
+        Compute orientation reward based on quaternion difference.
+
+        Args:
+            cur_quat (np.array): current orientation [w, x, y, z]
+            goal_quat (np.array): goal orientation [w, x, y, z]
+            axis_weight (np.array or None): weights for [rx, ry, rz] axes
+            use_arctan (bool): whether to apply arctangent smoothing to reward
+
+        Returns:
+            float: orientation reward (the more negative, the worse the orientation mismatch)
+        """
+
+        # Convert to scipy Rotation objects
+        r_current = Rotation.from_quat([cur_quat[1], cur_quat[2], cur_quat[3], cur_quat[0]])  # x,y,z,w
+        r_goal = Rotation.from_quat([goal_quat[1], goal_quat[2], goal_quat[3], goal_quat[0]])  # x,y,z,w
+
+        # Compute relative rotation
+        r_diff = r_goal * r_current.inv()
+
+        # Convert to rotation vector
+        rotvec = r_diff.as_rotvec()  # shape (3,), angle * axis
+        angle = np.linalg.norm(rotvec)  # total angle in radians
+
+        if axis_weight is None:
+            # Default: equal weights
+            axis_weight = np.array([1.0, 1.0, 1.0])
+
+        weighted_error = np.sum(axis_weight * np.abs(rotvec))
+
+        # Optional: apply arctan smoothing
+        if use_arctan:
+            orientation_reward = -np.arctan(weighted_error)
+        else:
+            orientation_reward = -weighted_error
+
+        return orientation_reward
+    
+    def _compute_reward(self, observation):
+        # 提取当前末端 pose
+        cur_gripper_pos = observation[:3].copy()
+        cur_gripper_quat = observation[3:7].copy()
+
+        # 目标 pose
+        goal_pos = self.goal_pos.copy()
+        goal_quat = self.goal_quat.copy()
+
+        # 当前关节角度
+        cur_joint_angle = self.data.qpos[:6].copy()
+        # 目标关节角度
+        goal_angle = self.goal_angle.copy()
+
+        # 计算位置误差 reward
+        # 计算位置误差（欧氏距离）
+        pos_error = np.linalg.norm(cur_gripper_pos - goal_pos)
+        pos_reward = -np.arctan(pos_error)
+
+        # 计算姿态误差 reward（四元数角度差)
+        # 姿态误差reward: 误差越小奖励越大，同样用负指数衰减
+        ori_reward = self._compute_orientation_reward(cur_gripper_quat, goal_quat)
+
+        # 计算关节角度差异 reward
+        angle_error = np.linalg.norm(cur_joint_angle - goal_angle)
+        angle_reward = -np.arctan(angle_error)
+        
+
+        # 综合奖励，给各个reward设置权重
+        w_pos =  5.0
+        w_ori = 0.2
+        w_angle = 0.3
+
+        # reward = w_pos * pos_reward + w_ori * ori_reward + w_fine * fine_grained_reward
+        # reward = w_pos * pos_reward + w_ori * ori_reward + w_angle * angle_reward
+        # reward = w_pos * pos_reward + w_angle * angle_reward
+        reward = w_pos * pos_reward
+
+        # print(f"pos_reward : {pos_reward}, ori_reward :{ori_reward}, angle_reward :{angle_reward}")
+
+        # 达到目标阈值时，给额外奖励
+        pos_thresh = 0.1  # 2cm
+        angle_thresh = 0.1
+
+        # print(f"pos_error : {pos_error}, orientation_error : {orientation_error}, angle_error : {angle_error}")
+        # print(f"pos_reward : {w_pos *pos_reward}, ori_reward : {w_ori *ori_reward}, angle_reward : {w_angle *angle_reward}")
+
+        if pos_error < pos_thresh or angle_error < angle_thresh:
+            self.goal_reached = True
+            reward += 10.0  # 达成目标大奖励
+
+        return reward
 
     def step(self, action):
         # 将 action 映射回真实机械臂关节空间
         mapped_action = self.map_action_to_joint_limits(action)
         self.data.qpos[:6] = mapped_action
-        self._label_goal_pose(self.goal_pos, self.goal_wxyz)
-        # mujoco 仿真向前推进一步
+        self._label_goal_pose(self.goal_pos, self.goal_quat)
+        # mujoco 仿真向前推进一步 (这里只更新 qpos , 并不会做动力学积分)
         mujoco.mj_forward(self.model, self.data)
-        # mujoco.mj_step(self.model, self.data)
 
         self.step_number += 1
         observation = self._get_observation()
-        # Check if observation contains only finite values
+        # 检查观测量是否包含无效值
         is_finite = np.isfinite(observation).all()
-        current_joint_positions = observation[:6]
 
-        # Check if current joint positions are close to the goal
-        goal_reached = np.allclose(current_joint_positions, self.goal_angle, atol=1e-2) 
-
+        # 计算 reward
+        reward = self._compute_reward(observation)
         
-
-
-        if goal_reached:
-            self.goal_reached_count += 1
-            print(f" goal reach !!! ")
-            reward = 10
-        else:       
-            vec_1 = current_joint_positions - self.goal_angle
-            reward_dist = -np.linalg.norm(vec_1)
-            reward_ctrl = -np.square(action).sum()
-            reward = 0.5 * reward_dist + 0.1 * reward_ctrl
-
-        
-        done = not is_finite or goal_reached
+        # 检查是否终止当前环境采样 (观测值无效或当前角度已经到达目标角度)
+        # current_joint_positions = self.data.qpos.flat[:6],
+        # goal_reached = np.allclose(current_joint_positions, self.goal_angle, atol=1e-2) 
+        done = not is_finite or self.goal_reached
         info = {'is_success': done}
-        truncated = self.step_number > self.episode_len
 
-        self.handle.sync()
+        # 检查是否提前终止当前环境采样
+        truncated = self.step_number > self.episode_len
+        if self.handle is not None:
+            self.handle.sync()
 
         return observation, reward, done, truncated, info
 
@@ -315,13 +400,13 @@ if __name__ == "__main__":
             observation, reward, done, truncated, info = env.step(action)
             if step % 100 == 0:
                 print("*****************************")
-                print(f"Goal goal: {env.goal}")
-                print(f"Current Joint Positions: {observation[:6]}")
-                print(reward)
+                print(f"goal_pos : {env.goal_pos}, goal_quat : {env.goal_quat}")
+                print(f"cur_pos: {observation[:3]}, cur_quat : {observation[3:7]}")
+                print(f"reward : {reward}")
 
             if done or truncated:
-                observation = env.reset()
-                break
+                observation, _ = env.reset()
+                # break
 
             time.sleep(0.05)
     finally:

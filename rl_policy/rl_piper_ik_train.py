@@ -264,6 +264,45 @@ class PiperEnv(gym.Env):
             self.goal_quat
             ])
     
+    def _compute_orientation_reward(self, cur_quat, goal_quat, axis_weight=None, use_arctan=True):
+        """
+        Compute orientation reward based on quaternion difference.
+
+        Args:
+            cur_quat (np.array): current orientation [w, x, y, z]
+            goal_quat (np.array): goal orientation [w, x, y, z]
+            axis_weight (np.array or None): weights for [rx, ry, rz] axes
+            use_arctan (bool): whether to apply arctangent smoothing to reward
+
+        Returns:
+            float: orientation reward (the more negative, the worse the orientation mismatch)
+        """
+
+        # Convert to scipy Rotation objects
+        r_current = Rotation.from_quat([cur_quat[1], cur_quat[2], cur_quat[3], cur_quat[0]])  # x,y,z,w
+        r_goal = Rotation.from_quat([goal_quat[1], goal_quat[2], goal_quat[3], goal_quat[0]])  # x,y,z,w
+
+        # Compute relative rotation
+        r_diff = r_goal * r_current.inv()
+
+        # Convert to rotation vector
+        rotvec = r_diff.as_rotvec()  # shape (3,), angle * axis
+        angle = np.linalg.norm(rotvec)  # total angle in radians
+
+        if axis_weight is None:
+            # Default: equal weights
+            axis_weight = np.array([1.0, 1.0, 1.0])
+
+        weighted_error = np.sum(axis_weight * np.abs(rotvec))
+
+        # Optional: apply arctan smoothing
+        if use_arctan:
+            orientation_reward = -np.arctan(weighted_error)
+        else:
+            orientation_reward = -weighted_error
+
+        return orientation_reward
+    
     def _compute_reward(self, observation):
         # 提取当前末端 pose
         cur_gripper_pos = observation[:3].copy()
@@ -283,12 +322,9 @@ class PiperEnv(gym.Env):
         pos_error = np.linalg.norm(cur_gripper_pos - goal_pos)
         pos_reward = -np.arctan(pos_error)
 
-        # 计算姿态误差 reward（四元数角度差）
-        # 计算两个四元数的内积，得到cos(theta/2)
-        dot_product = np.abs(np.dot(cur_gripper_quat, goal_quat))
-        orientation_error = 2 * np.arccos(np.clip(dot_product, -1.0, 1.0))
+        # 计算姿态误差 reward（四元数角度差)
         # 姿态误差reward: 误差越小奖励越大，同样用负指数衰减
-        ori_reward = -np.arctan(orientation_error)
+        ori_reward = self._compute_orientation_reward(cur_gripper_quat, goal_quat)
 
         # 计算关节角度差异 reward
         angle_error = np.linalg.norm(cur_joint_angle - goal_angle)
@@ -296,25 +332,26 @@ class PiperEnv(gym.Env):
         
 
         # 综合奖励，给各个reward设置权重
-        w_pos =  1.0
-        w_ori = 1.0
-        w_angle = 1.0
+        w_pos =  5.0
+        w_ori = 0.2
+        w_angle = 0.3
 
         # reward = w_pos * pos_reward + w_ori * ori_reward + w_fine * fine_grained_reward
-        reward = w_pos * pos_reward + w_ori * ori_reward + w_angle * angle_reward
+        # reward = w_pos * pos_reward + w_ori * ori_reward + w_angle * angle_reward
+        # reward = w_pos * pos_reward + w_angle * angle_reward
+        reward = w_pos * pos_reward
+
         # print(f"pos_reward : {pos_reward}, ori_reward :{ori_reward}, angle_reward :{angle_reward}")
 
         # 达到目标阈值时，给额外奖励
-        pos_thresh = 0.02  # 2cm
-        ori_thresh = 0.1   # 大约5.7度
+        pos_thresh = 0.1  # 2cm
         angle_thresh = 0.1
 
-        print(f"pos_error : {pos_error}, orientation_error : {orientation_error}, angle_error : {angle_error}")
-        print(f"pos_reward : {pos_reward}, ori_reward : {ori_reward}, angle_reward : {angle_reward}")
+        # print(f"pos_error : {pos_error}, orientation_error : {orientation_error}, angle_error : {angle_error}")
+        # print(f"pos_reward : {w_pos *pos_reward}, ori_reward : {w_ori *ori_reward}, angle_reward : {w_angle *angle_reward}")
 
-        if (pos_error < pos_thresh and orientation_error < ori_thresh) or angle_error < angle_thresh:
-            # self.goal_reached = True
-            print(f"1111111111")
+        if pos_error < pos_thresh or angle_error < angle_thresh:
+            self.goal_reached = True
             reward += 10.0  # 达成目标大奖励
 
         return reward

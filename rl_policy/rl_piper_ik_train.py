@@ -49,65 +49,28 @@ class PiperEnv(gym.Env):
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(6,))
         # 观测空间，包含末端位姿和目标位姿
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(7 + 7,))
-        self.goal = np.array([
-            np.random.uniform(0.1, 0.3),    # x
-            np.random.uniform(0.0, 0.3),   # y
-            np.random.uniform(0.1, 0.5)     # z
-        ])
         self.np_random = None   
         self.step_number = 0
 
         #workspace limit of robot
         self.workspace_limits = {
-            'x' : (0.2, 0.7),
-            'y' : (-0.5, 0.5),
-            'z' : (0.2, 0.5)
+            'x' : (0.1, 0.7),
+            'y' : (-0.7, 0.7),
+            'z' : (0.1, 0.7)
         }
 
         self.goal_reached = False
-
-        self._reset_noise_scale = .0
+        self._reset_noise_scale = 0.0
 
         # 初始化目标 pose
         self.goal_pos = None
         self.goal_quat = None
         self.goal_angle = None
-
         self._set_goal_pose()
-        # if self.goal_pos is not None and self.goal_quat is not None:
-        #     print(f"self.goal_pos : {self.goal_pos}, self.goal_quat : {self.goal_quat}")
 
         self.episode_len = 200
-
         self.init_qpos = np.zeros(6)
         self.init_qvel = np.zeros(6)
-
-    def _matrix_to_pose_quat(self, T):
-        """
-        将4x4齐次变换矩阵转换为位置 + 四元数 (w, x, y, z)
-        
-        参数：
-            T (np.ndarray): 4x4 齐次变换矩阵
-
-        返回：
-            position (np.ndarray): 3维位置向量 [x, y, z]
-            quaternion (np.ndarray): 四元数 [w, x, y, z]
-        """
-        assert T.shape == (4, 4), "输入必须是 4x4 的齐次变换矩阵"
-
-        # 提取位置
-        position = T[:3, 3]
-
-        # 提取旋转矩阵
-        rotation_matrix = T[:3, :3]
-
-        # 转换为四元数 (默认 xyzw)
-        quat_xyzw = Rotation.from_matrix(rotation_matrix).as_quat()
-
-        # 转换为 wxyz 格式
-        quat_wxyz = np.roll(quat_xyzw, 1)  # xyzw -> wxyz
-
-        return position, quat_wxyz
     
     #set random goal position for cartesian space
     def _label_goal_pose(self, position, quat_wxyz):
@@ -170,7 +133,6 @@ class PiperEnv(gym.Env):
                 random_angle = np.random.uniform(low_limit, high_limit)
                 angles.append(random_angle)
 
-            # angles = [0.63853179, 1.30619515, -1.1758934, -0.9242861, -0.56871957, -2.61769393]
             angles = np.array(angles)
             # 
             ori_qpos = self.data.qpos[:6].copy()
@@ -195,7 +157,7 @@ class PiperEnv(gym.Env):
                 self._label_goal_pose(goal_position, goal_quat)
 
 
-                self.goal_pos = goal_pos
+                self.goal_pos = goal_position
                 self.goal_quat = goal_quat
                 self.goal_angle = angles
                 return
@@ -243,9 +205,6 @@ class PiperEnv(gym.Env):
         self._set_goal_pose()
         obs = self._get_observation()
         self.step_number = 0
-        # print(f"reset env !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        # if self.goal_pos is not None and self.goal_quat is not None:
-        #     print(f"self.goal_pos : {self.goal_pos}, self.goal_quat : {self.goal_quat}")
 
         self.goal_reached = False
 
@@ -261,7 +220,13 @@ class PiperEnv(gym.Env):
             self.goal_quat
             ])
     
-    def _compute_orientation_reward(self, cur_quat, goal_quat, axis_weight=None, use_arctan=True):
+    def _compute_pos_error_and_reward(self, cur_pos, goal_pos):
+        # 计算位置误差（欧氏距离）
+        pos_error = np.linalg.norm(cur_pos - goal_pos)
+        pos_reward = -np.arctan(pos_error)
+        return pos_reward, pos_error
+    
+    def _compute_ori_error_and_reward(self, cur_quat, goal_quat, axis_weight=None, use_arctan=True):
         """
         Compute orientation reward based on quaternion difference.
 
@@ -279,26 +244,28 @@ class PiperEnv(gym.Env):
         r_current = Rotation.from_quat([cur_quat[1], cur_quat[2], cur_quat[3], cur_quat[0]])  # x,y,z,w
         r_goal = Rotation.from_quat([goal_quat[1], goal_quat[2], goal_quat[3], goal_quat[0]])  # x,y,z,w
 
-        # Compute relative rotation
+        # 计算相对旋转（姿态差）∈ [0, π]
         r_diff = r_goal * r_current.inv()
 
-        # Convert to rotation vector
+        # Convert to rotation vector ∈ [[-π, π], [-π, π], [-π, π]]
         rotvec = r_diff.as_rotvec()  # shape (3,), angle * axis
-        angle = np.linalg.norm(rotvec)  # total angle in radians
 
         if axis_weight is None:
             # Default: equal weights
             axis_weight = np.array([1.0, 1.0, 1.0])
 
+        # weighted_error ∈ [0, π ⋅ 1.732]
         weighted_error = np.sum(axis_weight * np.abs(rotvec))
 
         # Optional: apply arctan smoothing
         if use_arctan:
+            # orientation_reward ∈ [-1.387, 0]
             orientation_reward = -np.arctan(weighted_error)
         else:
+            # orientation_reward ∈ [-π ⋅ 1.732, 0]
             orientation_reward = -weighted_error
 
-        return orientation_reward
+        return orientation_reward, weighted_error
     
     def _compute_reward(self, observation):
         # 提取当前末端 pose
@@ -309,49 +276,43 @@ class PiperEnv(gym.Env):
         goal_pos = self.goal_pos.copy()
         goal_quat = self.goal_quat.copy()
 
-        # 当前关节角度
-        cur_joint_angle = self.data.qpos[:6].copy()
-        # 目标关节角度
-        goal_angle = self.goal_angle.copy()
-
-        # 计算位置误差 reward
-        # 计算位置误差（欧氏距离）
-        pos_error = np.linalg.norm(cur_gripper_pos - goal_pos)
-        pos_reward = -np.arctan(pos_error)
-
-        # 计算姿态误差 reward（四元数角度差)
-        # 姿态误差reward: 误差越小奖励越大，同样用负指数衰减
-        ori_reward = self._compute_orientation_reward(cur_gripper_quat, goal_quat)
-
-        # 计算关节角度差异 reward
-        # angle_error = np.linalg.norm(cur_joint_angle[:2] - goal_angle[:2])
-        angle_error = np.linalg.norm(cur_joint_angle - goal_angle)
-        angle_reward = -np.arctan(angle_error)
-        
+        # 计算位置误差与位置reward
+        pos_reward, pos_error = self._compute_pos_error_and_reward(cur_gripper_pos, goal_pos)
+        # 计算姿态误差 reward
+        ori_reward, ori_error = self._compute_ori_error_and_reward(cur_gripper_quat, goal_quat)
 
         # 综合奖励，给各个reward设置权重
         w_pos =  2.0
         w_ori = 0.2
-        w_angle = 0.5
-
         reward = w_pos * pos_reward + w_ori * ori_reward
-        # reward = w_pos * pos_reward + w_ori * ori_reward + w_angle * angle_reward
-        # reward = w_pos * pos_reward + w_angle * angle_reward
-        # reward = w_pos * pos_reward
-        # print(f"pos_error : {pos_error}, angle_error :{angle_error}")
-        # print(f"pos_reward : {w_pos * pos_reward}, ori_reward :{ori_reward}, angle_reward :{w_angle * angle_reward}")
 
-        # 达到目标阈值时，给额外奖励
-        pos_thresh = 0.02  # 2cm
-        angle_thresh = 0.1
+        # 达到目标阈值时，增加精细奖励
+        pos_thresh = 0.1  # 10 cm
+        ori_thresh = 1.047
+        # 精细奖励的有效范围
+        pos_range = 0.1     # 10 cm
+        ori_range = 1.047   # 60° 
 
-        # print(f"pos_error : {pos_error}, orientation_error : {orientation_error}, angle_error : {angle_error}")
-        # print(f"pos_reward : {w_pos *pos_reward}, ori_reward : {w_ori *ori_reward}, angle_reward : {w_angle *angle_reward}")
+        success_pos_thresh = 0.02   # 2 cm
+        success_ori_thresh = 0.1   # 6°
 
-        if pos_error < pos_thresh or angle_error < angle_thresh:
-            self.goal_reached = True
-            reward += 10.0  # 达成目标大奖励
+        if pos_error < pos_thresh and ori_error < ori_thresh:
+            # 将误差归一化到 [0, 1]，并截断
+            pos_norm = min(pos_error / pos_range, 1.0)
+            ori_norm = min(ori_error / ori_range, 1.0)
 
+            pos_fine_reward = (1.0 - pos_norm)  # 越小越好
+            ori_fine_reward = (1.0 - ori_norm)
+
+            # 位置误差已经较小的时候, 优先奖励旋转
+            w_fine_pos = 1.0
+            w_fine_ori = 3.0
+
+            fine_reward = w_fine_pos * pos_fine_reward + w_fine_ori * ori_fine_reward
+            reward += fine_reward
+            if pos_error < success_pos_thresh and ori_error < success_ori_thresh:
+                self.goal_reached = True
+                reward += 10.0  # 认为基本上已经完美到达目标, 再增加一部分奖励
         return reward
 
     def step(self, action):
@@ -369,10 +330,6 @@ class PiperEnv(gym.Env):
 
         # 计算 reward
         reward = self._compute_reward(observation)
-        
-        # 检查是否终止当前环境采样 (观测值无效或当前角度已经到达目标角度)
-        # current_joint_positions = self.data.qpos.flat[:6],
-        # goal_reached = np.allclose(current_joint_positions, self.goal_angle, atol=1e-2) 
         done = not is_finite or self.goal_reached
         info = {'is_success': done}
 

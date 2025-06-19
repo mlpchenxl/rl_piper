@@ -6,5 +6,5 @@ env/__pycache__/
 MUJOCO_LOG.TXT
 ppo_piper/
 piper_ppo_model.zip
-piper_ik_ppo_model.zip
 .vscode/
+import_wang.zip

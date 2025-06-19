@@ -54,9 +54,7 @@ class PiperEnv(gym.Env):
             np.random.uniform(0.0, 0.3),   # y
             np.random.uniform(0.1, 0.5)     # z
         ])
-        print("goal:", self.goal)
         self.np_random = None   
-
         self.step_number = 0
 
         #workspace limit of robot
@@ -76,8 +74,8 @@ class PiperEnv(gym.Env):
         self.goal_angle = None
 
         self._set_goal_pose()
-        if self.goal_pos is not None and self.goal_quat is not None:
-            print(f"self.goal_pos : {self.goal_pos}, self.goal_quat : {self.goal_quat}")
+        # if self.goal_pos is not None and self.goal_quat is not None:
+        #     print(f"self.goal_pos : {self.goal_pos}, self.goal_quat : {self.goal_quat}")
 
         self.episode_len = 200
 
@@ -195,7 +193,6 @@ class PiperEnv(gym.Env):
 
                 goal_position = np.array([x_goal, y_goal, z_goal])
                 self._label_goal_pose(goal_position, goal_quat)
-                print(f"goal_angles : {angles}")
 
 
                 self.goal_pos = goal_pos
@@ -246,9 +243,9 @@ class PiperEnv(gym.Env):
         self._set_goal_pose()
         obs = self._get_observation()
         self.step_number = 0
-        print(f"reset env !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        if self.goal_pos is not None and self.goal_quat is not None:
-            print(f"self.goal_pos : {self.goal_pos}, self.goal_quat : {self.goal_quat}")
+        # print(f"reset env !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        # if self.goal_pos is not None and self.goal_quat is not None:
+        #     print(f"self.goal_pos : {self.goal_pos}, self.goal_quat : {self.goal_quat}")
 
         self.goal_reached = False
 
@@ -345,7 +342,7 @@ class PiperEnv(gym.Env):
         # print(f"pos_reward : {w_pos * pos_reward}, ori_reward :{ori_reward}, angle_reward :{w_angle * angle_reward}")
 
         # 达到目标阈值时，给额外奖励
-        pos_thresh = 0.05  # 2cm
+        pos_thresh = 0.02  # 2cm
         angle_thresh = 0.1
 
         # print(f"pos_error : {pos_error}, orientation_error : {orientation_error}, angle_error : {angle_error}")

@@ -45,7 +45,7 @@ class PiperEnv(gym.Env):
             (-1.22, 1.22),
             (-3.14, 3.14),
         ])
-        self.rl_model = PPO.load("./piper_ik_ppo_model.zip")
+        self.rl_model = PPO.load("./import_wang.zip")
 
 
         # 动作空间，6个关节
@@ -76,7 +76,7 @@ class PiperEnv(gym.Env):
         if self.goal_pos is not None and self.goal_quat is not None:
             print(f"self.goal_pos : {self.goal_pos}, self.goal_quat : {self.goal_quat}")
 
-        self.episode_len = 200
+        self.episode_len = 10
 
         self.init_qpos = np.zeros(6)
         self.init_qvel = np.zeros(6)
@@ -169,8 +169,8 @@ class PiperEnv(gym.Env):
                 random_angle = np.random.uniform(low_limit, high_limit)
                 angles.append(random_angle)
 
-            angles = [0.63853179, 1.30619515, -1.1758934, -0.9242861, -0.56871957, -2.61769393]
-            # angles = np.array(angles)
+            # angles = [0.63853179, 1.30619515, -1.1758934, -0.9242861, -0.56871957, -2.61769393]
+            angles = np.array(angles)
             # 
             ori_qpos = self.data.qpos[:6].copy()
             # 模型往前一步
@@ -243,7 +243,6 @@ class PiperEnv(gym.Env):
         self._set_goal_pose()
         obs = self._get_observation()
         self.step_number = 0
-        print(f"reset env !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         if self.goal_pos is not None and self.goal_quat is not None:
             print(f"self.goal_pos : {self.goal_pos}, self.goal_quat : {self.goal_quat}")
 

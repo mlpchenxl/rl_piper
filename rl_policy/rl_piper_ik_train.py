@@ -368,7 +368,7 @@ if __name__ == "__main__":
         env,
         policy_kwargs=policy_kwargs,
         verbose=1,
-        n_steps=20,
+        n_steps=10,
         batch_size=64,
         n_epochs=10,
         gamma=0.99,
@@ -377,7 +377,7 @@ if __name__ == "__main__":
         tensorboard_log="./ppo_piper/"
     )
 
-    model.learn(total_timesteps=2000*10000, progress_bar=True)
+    model.learn(total_timesteps=2000*1000, progress_bar=True)
     model.save("piper_ik_ppo_model")
 
     print(" model sava success ! ")

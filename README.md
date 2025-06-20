@@ -3,6 +3,15 @@
 本项目支持单臂（single_piper）强化学习逆运动学
 
 ---
+> ⚠️ **Note**
+> 
+> 已在项目中提供了一个训练好的权重, 名为 piper_ik_ppo_model.zip ， 可直接执行测试:
+> ```bash
+> $ conda activate rl_piper
+> $ python rl_policy/rl_piper_ik_test.py
+> ```
+>
+> 如需重新训练权重，可将原权重先重新命名，否则训练会默认覆盖原权重
 
 
 ## 安装

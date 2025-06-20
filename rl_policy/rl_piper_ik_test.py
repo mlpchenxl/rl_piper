@@ -12,6 +12,7 @@ import mujoco.viewer
 import os
 import time
 from scipy.spatial.transform import Rotation as Rotation
+import argparse
 
 # 忽略特定警告
 warnings.filterwarnings("ignore", category=UserWarning, module="stable_baselines3.common.on_policy_algorithm")
@@ -74,33 +75,6 @@ class PiperEnv(gym.Env):
         self.episode_len = 50
         self.init_qpos = np.zeros(6)
         self.init_qvel = np.zeros(6)
-
-    def _matrix_to_pose_quat(self, T):
-        """
-        将4x4齐次变换矩阵转换为位置 + 四元数 (w, x, y, z)
-        
-        参数：
-            T (np.ndarray): 4x4 齐次变换矩阵
-
-        返回：
-            position (np.ndarray): 3维位置向量 [x, y, z]
-            quaternion (np.ndarray): 四元数 [w, x, y, z]
-        """
-        assert T.shape == (4, 4), "输入必须是 4x4 的齐次变换矩阵"
-
-        # 提取位置
-        position = T[:3, 3]
-
-        # 提取旋转矩阵
-        rotation_matrix = T[:3, :3]
-
-        # 转换为四元数 (默认 xyzw)
-        quat_xyzw = Rotation.from_matrix(rotation_matrix).as_quat()
-
-        # 转换为 wxyz 格式
-        quat_wxyz = np.roll(quat_xyzw, 1)  # xyzw -> wxyz
-
-        return position, quat_wxyz
     
     #set random goal position for cartesian space
     def _label_goal_pose(self, position, quat_wxyz):
@@ -361,6 +335,7 @@ class PiperEnv(gym.Env):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run the PiperEnv RL simulation.")
     env = PiperEnv()
     observation, _ = env.reset()
 

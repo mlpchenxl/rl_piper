@@ -11,6 +11,7 @@ import mujoco.viewer
 import os
 from scipy.spatial.transform import Rotation as Rotation
 from stable_baselines3.common.evaluation import evaluate_policy
+import argparse
 
 # 忽略特定警告
 warnings.filterwarnings("ignore", category=UserWarning, module="stable_baselines3.common.on_policy_algorithm")
@@ -293,26 +294,25 @@ class PiperEnv(gym.Env):
         pos_range = 0.1     # 10 cm
         ori_range = 1.047   # 60° 
 
-        success_pos_thresh = 0.02   # 2 cm
-        success_ori_thresh = 0.1   # 6°
+        success_pos_thresh = 0.05   # 5 cm
+        success_ori_thresh = 0.2   # 11.5°
 
         if pos_error < pos_thresh and ori_error < ori_thresh:
-            # 将误差归一化到 [0, 1]，并截断
-            pos_norm = min(pos_error / pos_range, 1.0)
-            ori_norm = min(ori_error / ori_range, 1.0)
 
-            pos_fine_reward = (1.0 - pos_norm)  # 越小越好
-            ori_fine_reward = (1.0 - ori_norm)
+            pos_fine_reward = 1.0 - np.tanh(pos_error / pos_range)
+            ori_fine_reward = 1.0 - np.tanh(ori_error / ori_range)
+            
 
             # 位置误差已经较小的时候, 优先奖励旋转
             w_fine_pos = 1.0
-            w_fine_ori = 3.0
+            w_fine_ori = 1.0
 
             fine_reward = w_fine_pos * pos_fine_reward + w_fine_ori * ori_fine_reward
             reward += fine_reward
+            # 认为基本上已经完美到达目标, 再增加一部分奖励
             if pos_error < success_pos_thresh and ori_error < success_ori_thresh:
                 self.goal_reached = True
-                reward += 10.0  # 认为基本上已经完美到达目标, 再增加一部分奖励
+                reward += 10.0 
         return reward
 
     def step(self, action):
@@ -346,7 +346,17 @@ class PiperEnv(gym.Env):
 
 
 if __name__ == "__main__":
-    env = make_vec_env(lambda: PiperEnv(), n_envs=100)
+    parser = argparse.ArgumentParser(description="Run the PiperEnv RL simulation.")
+    parser.add_argument('--render', action='store_true', help='Enable rendering with GUI viewer')
+    parser.add_argument('--n_envs', type=int, default=1, help='Number of envs')
+    args = parser.parse_args()
+
+    # ✅ 增加检查逻辑
+    if args.render and args.n_envs != 1:
+        raise ValueError("Rendering is only supported with --n_envs=1")
+
+    # 创建 agent 交互环境
+    env = make_vec_env(lambda: PiperEnv(render=args.render), n_envs=args.n_envs)
 
     policy_kwargs = dict(
         activation_fn=nn.ReLU,

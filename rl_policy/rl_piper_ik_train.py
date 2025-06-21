@@ -363,13 +363,24 @@ if __name__ == "__main__":
         net_arch=[dict(pi=[256, 128], vf=[256, 128])]
     )
 
+    """
+    训练参数
+    参数名	                   解释	                                建议与注意事项
+    learning_rate	          学习率	                           固定值适合起步，调 schedule 可提升稳定性
+    n_steps	                  每个环境每次 rollout 的步数            必须满足 n_steps * n_envs > 1, 推荐设为 128~2048
+    batch_size	              每次优化的最小 batch 大小	             
+    n_epochs	              每次更新重复训练的次数	              增加样本利用率， 3~10 是常用区间
+    gamma	                  奖励折扣因子（长期 vs 短期）	          0.95~0.99 之间，任务长期性越强设得越高
+    device	                  训练使用设备	                        GPU / CPU
+    tensorboard_log           训练日志保存地址
+    """
     model = PPO(
         "MlpPolicy",
         env,
         policy_kwargs=policy_kwargs,
         verbose=1,
-        n_steps=10,
-        batch_size=64,
+        n_steps=16,
+        batch_size=512,
         n_epochs=10,
         gamma=0.99,
         learning_rate=3e-4,
@@ -377,7 +388,12 @@ if __name__ == "__main__":
         tensorboard_log="./ppo_piper/"
     )
 
-    model.learn(total_timesteps=2000*1000, progress_bar=True)
+    """
+    参数名	                  解释	                                   
+    total_timesteps          总共与环境交互的步数（env.step() 的次数总和）   
+    progress_bar             是否显示训练进度条
+    """
+    model.learn(total_timesteps=2048*1000, progress_bar=True)
     model.save("piper_ik_ppo_model")
 
     print(" model sava success ! ")
@@ -390,7 +406,7 @@ if __name__ == "__main__":
 
     """
     🔁 rollout/ 部分（环境交互结果）
-    ep_len_mean	           每个 episode 平均的步数 (本例为 2000)
+    ep_len_mean	           每个 episode 平均的步数 (本例为 200)
     ep_rew_mean	           每个 episode 平均的累计 reward
     success_rate	       每个 episode 是否完成成功任务的比例
 

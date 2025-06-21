@@ -72,7 +72,7 @@ class PiperEnv(gym.Env):
         self.goal_angle = None
         self._set_goal_pose()
 
-        self.episode_len = 50
+        self.episode_len = 500
         self.init_qpos = np.zeros(6)
         self.init_qvel = np.zeros(6)
     
@@ -160,7 +160,6 @@ class PiperEnv(gym.Env):
 
                 goal_position = np.array([x_goal, y_goal, z_goal])
                 self._label_goal_pose(goal_position, goal_quat)
-                print(f"goal_angles : {angles}")
 
 
                 self.goal_pos = goal_pos
@@ -292,18 +291,33 @@ class PiperEnv(gym.Env):
         w_ori = 0.2
         reward = w_pos * pos_reward + w_ori * ori_reward
 
-        # 达到目标阈值时，给额外奖励
-        pos_thresh = 0.02  # 2cm
-        ori_thresh = 0.1   # 6°
-        # print(f"pos_reward : {w_pos *pos_reward}, ori_reward : {w_ori *ori_reward}, angle_reward : {w_angle *angle_reward}")
+        # 达到目标阈值时，增加精细奖励
+        pos_thresh = 0.1  # 10 cm
+        ori_thresh = 1.047
+        # 精细奖励的有效范围
+        pos_range = 0.1     # 10 cm
+        ori_range = 1.047   # 60° 
 
-        if pos_error < pos_thresh:
-            reward += 10.0  # 达成位置目标大奖励
-            if ori_error < ori_thresh:
+        success_pos_thresh = 0.15   # 15 cm
+        success_ori_thresh = 0.8   
+
+        if pos_error < pos_thresh and ori_error < ori_thresh:
+
+            pos_fine_reward = 1.0 - np.tanh(pos_error / pos_range)
+            ori_fine_reward = 1.0 - np.tanh(ori_error / ori_range)
+            
+
+            # 位置误差已经较小的时候, 优先奖励旋转
+            w_fine_pos = 1.0
+            w_fine_ori = 0.0
+
+            fine_reward = w_fine_pos * pos_fine_reward + w_fine_ori * ori_fine_reward
+            reward += fine_reward
+            # 认为基本上已经完美到达目标, 再增加一部分奖励
+            if pos_error < success_pos_thresh and ori_error < success_ori_thresh:
                 self.goal_reached = True
-                reward += 10.0  # 在位置目标满足的情况下，姿态误差也小，再增加一部分奖励
+                reward += 10.0 
         return reward
-
     def step(self, action):
         # 将 action 映射回真实机械臂关节空间
         mapped_action = self.map_action_to_joint_limits(action)
@@ -324,7 +338,7 @@ class PiperEnv(gym.Env):
 
         # 检查是否提前终止当前环境采样
         truncated = self.step_number > self.episode_len
-        if self.handle is not None:
+        if self.handle is not None and done:
             self.handle.sync()
 
         return observation, reward, done, truncated, info
@@ -341,18 +355,18 @@ if __name__ == "__main__":
 
     try:
         # Run the simulation loop
-        for step in range(20000):
+        while True:
             action, _states = env.rl_model.predict(observation)
             observation, reward, done, truncated, info = env.step(action)
-            if step % 100 == 0:
-                print("*****************************")
-                print(f"goal_pos : {env.goal_pos}, goal_quat : {env.goal_quat}")
-                print(f"cur_pos: {observation[:3]}, cur_quat : {observation[3:7]}")
-                print(f"reward : {reward}")
 
             if done or truncated:
+                if done:
+                    print("*****************************")
+                    print(f"goal_pos : {env.goal_pos}, goal_quat : {env.goal_quat}")
+                    print(f"cur_pos: {observation[:3]}, cur_quat : {observation[3:7]}")
+                    print(f"reward : {reward}")
                 observation, _ = env.reset()
 
-            time.sleep(0.05)
+            time.sleep(0.0002)
     finally:
         env.close()
